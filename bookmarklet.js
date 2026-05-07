@@ -2,13 +2,14 @@
     if(document.getElementById('zynai-menu')) return;
 
     /* --- KONFIGURASI --- */
-    const GEMINI_API_KEY = "AIzaSyA7N_MnsxVTC0B6ZoqTqgaiIbpSYJhTruc"; // API Key kamu
+    const GEMINI_API_KEY = "AIzaSyA7N_MnsxVTC0B6ZoqTqgaiIbpSYJhTruc";
     const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_API_KEY}`;
 
     let config = {
         autoAnswer: false,
         incognito: false,
-        delay: 1, // Default delay 1ms sesuai screenshot
+        delay: 1,
+        isHidden: false,
         localAnswers: []
     };
 
@@ -22,35 +23,49 @@
             } catch(e) {}
         };
         bypass();
-        // Memblokir event deteksi sesuai instruksi di screenshot
-        const events = ['visibilitychange', 'webkitvisibilitychange', 'blur', 'focus', 'mouseleave'];
+        const events = ['visibilitychange', 'webkitvisibilitychange', 'blur', 'focus', 'mouseleave', 'mouseout'];
         events.forEach(ev => {
             window.addEventListener(ev, e => { if(config.incognito) e.stopImmediatePropagation(); }, true);
+            document.addEventListener(ev, e => { if(config.incognito) e.stopImmediatePropagation(); }, true);
         });
         setInterval(() => { if(config.incognito) bypass(); }, 100);
     }
 
-    /* --- FITUR 2: SMART SYNC (QUIZIT FORMAT) --- */
-    async function smartSync() {
-        const rawData = prompt("Tempelkan data jawaban dari Quizit di sini (Format: Soal|Jawaban):");
-        if(rawData) {
-            const lines = rawData.split('\n');
-            config.localAnswers = lines.map(l => {
-                const parts = l.split('|');
-                return parts.length >= 2 ? { q: parts[0].trim().toLowerCase(), a: parts[1].trim() } : null;
-            }).filter(x => x);
-            alert(`Smart Sync Berhasil! ${config.localAnswers.length} soal terdeteksi.`);
-        }
+    /* --- FITUR 2: SMART SYNC (LOGIKA PEMBERSIH DATA ACAK) --- */
+    function smartSync() {
+        const rawData = prompt("Tempelkan data acak dari Quizit di sini:");
+        if(!rawData) return;
+
+        // Membersihkan teks navigasi & memisahkan berdasarkan baris kosong
+        const segments = rawData.split(/\n\s*\n/);
+        const newEntries = [];
+
+        segments.forEach(seg => {
+            const lines = seg.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+            // Logika: Baris pertama biasanya soal, baris terakhir biasanya jawaban
+            if(lines.length >= 2) {
+                const question = lines[0].toLowerCase();
+                const answer = lines[lines.length - 1];
+                // Abaikan jika itu teks navigasi (seperti "Search in questions" atau "Copyright")
+                if(!question.includes('search in') && !question.includes('copyright')) {
+                    newEntries.push({ q: question, a: answer });
+                }
+            }
+        });
+
+        config.localAnswers = newEntries;
+        alert(`Smart Sync Berhasil! Berhasil mengekstrak ${newEntries.length} soal & jawaban.`);
     }
 
-    /* --- FITUR 3: LOGIKA PENCARI JAWABAN (GEMINI + LOCAL) --- */
+    /* --- FITUR 3: LOGIKA PENCARI JAWABAN --- */
     async function getAnswer(question, options) {
-        // Cek database lokal (Smart Sync) dulu
-        const found = config.localAnswers.find(x => question.toLowerCase().includes(x.q) || x.q.includes(question.toLowerCase()));
+        const qLower = question.toLowerCase();
+        // Cek database lokal hasil Smart Sync
+        const found = config.localAnswers.find(x => qLower.includes(x.q) || x.q.includes(qLower));
         if (found) return { text: found.a, source: "Smart Sync" };
 
-        // Jika tidak ada di lokal, tanya Gemini
-        const promptText = `Pilih jawaban yang benar dari opsi ini: ${options.join(", ")}. Soal: ${question}. Jawab hanya dengan teks pilihannya saja.`;
+        // Tanya Gemini jika tidak ada di lokal
+        const promptText = `Pilih satu jawaban tepat: ${options.join(", ")}. Soal: ${question}. Jawab hanya teks pilihannya.`;
         try {
             const res = await fetch(GEMINI_URL, {
                 method: "POST",
@@ -81,9 +96,11 @@
         if(config.autoAnswer && result.text) {
             setTimeout(() => {
                 for(let el of optEls) {
-                    if(el.innerText.trim().toLowerCase().includes(result.text.toLowerCase())) {
-                        el.click(); // Klik biasa
-                        el.dispatchEvent(new Event('click', {bubbles: true})); // Force click event sesuai screenshot
+                    const elText = el.innerText.trim().toLowerCase();
+                    const aiAns = result.text.toLowerCase();
+                    if(elText === aiAns || elText.includes(aiAns) || aiAns.includes(elText)) {
+                        el.click();
+                        el.dispatchEvent(new Event('click', {bubbles: true}));
                         break;
                     }
                 }
@@ -91,7 +108,7 @@
         }
     }
 
-    /* --- UI INTERFACE --- */
+    /* --- UI & STYLING --- */
     const style = document.createElement('style');
     style.innerHTML = `
         #zynai-menu { position:fixed; top:10px; right:10px; width:220px; background:#111; color:#fff; border-radius:10px; z-index:999999; font-family:sans-serif; border:1px solid #00ff88; box-shadow:0 0 15px rgba(0,255,136,0.5); }
@@ -100,6 +117,16 @@
         .zyn-btn { width:100%; padding:8px; margin-bottom:5px; background:#222; color:#00ff88; border:1px solid #00ff88; border-radius:5px; cursor:pointer; font-size:10px; font-weight:bold; }
         .zyn-active { background:#00ff88 !important; color:#000 !important; }
         #zyn-ans-box { background:#000; padding:8px; border-radius:5px; font-size:11px; color:#00ff88; border:1px solid #333; min-height:40px; }
+        
+        /* Tombol Logo Z di Pojok Kiri Bawah */
+        #zyn-logo-btn { 
+            position:fixed; bottom:10px; left:10px; width:25px; height:25px; 
+            background: rgba(0, 255, 136, 0.1); border: 1px solid rgba(0, 255, 136, 0.2); 
+            border-radius: 5px; z-index:1000000; cursor:pointer; 
+            display:flex; align-items:center; justify-content:center; 
+            color: rgba(0, 255, 136, 0.3); font-weight: bold; font-size: 14px; 
+            user-select:none; transition: 0.3s;
+        }
     `;
     document.head.appendChild(style);
 
@@ -115,6 +142,17 @@
         </div>
     `;
     document.body.appendChild(menu);
+
+    const logoBtn = document.createElement('div');
+    logoBtn.id = 'zyn-logo-btn';
+    logoBtn.innerText = 'Z';
+    document.body.appendChild(logoBtn);
+
+    logoBtn.onclick = () => {
+        config.isHidden = !config.isHidden;
+        menu.style.display = config.isHidden ? 'none' : 'block';
+        logoBtn.style.opacity = config.isHidden ? '0.8' : '0.3';
+    };
 
     /* --- EVENT LISTENERS --- */
     document.getElementById('btn-auto').onclick = function() {
