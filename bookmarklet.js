@@ -1,5 +1,5 @@
-(function(){
-    if(document.getElementById('zynai-menu')) return;
+javascript:(function(){
+    if(document.getElementById('zynai-v8-menu')) return;
 
     /* --- KONFIGURASI --- */
     const GEMINI_API_KEY = "AIzaSyA7N_MnsxVTC0B6ZoqTqgaiIbpSYJhTruc";
@@ -8,12 +8,13 @@
     let config = {
         autoAnswer: false,
         incognito: false,
-        delay: 800,
+        delayMin: 500,
+        delayMax: 1500,
         isHidden: false,
-        localAnswers: []
+        quizitData: []
     };
 
-    /* --- FITUR 1: INVISIBLE SWITCH --- */
+    /* --- FITUR ANTI-CHEAT --- */
     function enableIncognito() {
         const bypass = () => {
             try {
@@ -30,145 +31,149 @@
         setInterval(() => { if(config.incognito) bypass(); }, 150);
     }
 
-    /* --- FITUR 2: DEEP SCAN SOAL & JAWABAN --- */
-    async function solve() {
-        let question = "";
-        let optionEls = [];
+    /* --- LOGIKA SMART SYNC (UNTUK DATA BERANTAKAN) --- */
+    function processSmartSync() {
+        const rawData = prompt("Tempelkan hasil copy dari Quizit di sini:");
+        if(!rawData) return;
 
-        // 1. Scan Soal (Mencari teks terpanjang yang mirip soal)
-        const allTexts = Array.from(document.querySelectorAll('div, p, span, h1, h2'))
-                             .filter(el => el.innerText.trim().length > 10);
+        const entries = [];
+        // Membagi teks berdasarkan jarak baris kosong yang lebar
+        const segments = rawData.split(/\n\s*\n/); 
         
-        let bestQ = null;
-        let maxLen = 0;
-
-        for (let el of allTexts) {
-            const txt = el.innerText.trim();
-            // Prioritas soal: mengandung tanda tanya atau teks sangat panjang (>40 karakter)
-            if ((txt.includes('?') || txt.length > 40) && txt.length > maxLen) {
-                if (!txt.includes('ZYNAI') && !txt.includes('Ready')) {
-                    bestQ = el;
-                    maxLen = txt.length;
-                }
+        segments.forEach(seg => {
+            const lines = seg.split('\n')
+                             .map(l => l.trim())
+                             .filter(l => l.length > 2 && !/filter|search|discover|copyright|helper|assignment/i.test(l));
+            
+            if(lines.length >= 2) {
+                // Baris pertama dianggap soal, baris terakhir dianggap jawaban
+                entries.push({ q: lines[0].toLowerCase(), a: lines[lines.length - 1] });
             }
-        }
-        if (bestQ) question = bestQ.innerText.trim();
+        });
 
-        // 2. Scan Pilihan Jawaban
-        const optSelectors = ['.option', '[data-test="option"]', '.p-option', '[class*="answer-option"]', '[role="button"]'];
-        for (let sel of optSelectors) {
-            const found = Array.from(document.querySelectorAll(sel)).filter(el => el.innerText.trim().length > 0);
-            if (found.length >= 2) {
-                optionEls = found;
-                break;
-            }
-        }
-
-        const ansBox = document.getElementById('zyn-ans-box');
-        if (!question || optionEls.length < 2) {
-            ansBox.innerText = "Mencari elemen kuis...";
-            return;
-        }
-
-        if (ansBox.dataset.lastQ === question) return;
-        ansBox.dataset.lastQ = question;
-        ansBox.innerText = "Menganalisis soal...";
-
-        // 3. Logika Pencocokan (Smart Sync vs AI)
-        const qLower = question.toLowerCase();
-        let result = null;
-
-        const foundLocal = config.localAnswers.find(x => qLower.includes(x.q) || x.q.includes(qLower));
-        if (foundLocal) {
-            result = { text: foundLocal.a, source: "Smart Sync" };
+        if(entries.length > 0) {
+            config.quizitData = entries;
+            alert("Berhasil sinkronisasi " + entries.length + " soal!");
         } else {
-            const options = optionEls.map(el => el.innerText.trim());
-            const promptText = `Pilih satu jawaban tepat: ${options.join(", ")}. Soal: ${question}. Jawab hanya teks pilihannya saja.`;
-            try {
-                const res = await fetch(GEMINI_URL, {
-                    method: "POST",
-                    headers: {"Content-Type": "application/json"},
-                    body: JSON.stringify({ contents: [{ parts: [{ text: promptText }] }] })
-                });
-                const data = await res.json();
-                result = { text: data.candidates[0].content.parts[0].text.trim(), source: "Gemini AI" };
-            } catch(e) { result = { text: "Error API", source: "System" }; }
-        }
-
-        // 4. Eksekusi Jawaban
-        if (result && result.text) {
-            ansBox.innerText = `[${result.source}] Jawaban: ${result.text}`;
-            if (config.autoAnswer) {
-                setTimeout(() => {
-                    for (let el of optionEls) {
-                        const elTxt = el.innerText.trim().toLowerCase();
-                        const aiTxt = result.text.toLowerCase();
-                        if (elTxt === aiTxt || elTxt.includes(aiTxt) || aiTxt.includes(elTxt)) {
-                            el.click();
-                            break;
-                        }
-                    }
-                }, config.delay);
-            }
+            alert("Gagal membaca data. Pastikan format soal dan jawaban jelas.");
         }
     }
 
-    /* --- UI & STYLING --- */
+    /* --- LOGIKA PENCARI JAWABAN --- */
+    async function solve() {
+        const qSelectors = ['.question-text', '[data-test="question-text"]', '.q-text', '.question-container-text', 'div[class*="question-text"]'];
+        let question = "";
+        for(let sel of qSelectors) {
+            const el = document.querySelector(sel);
+            if(el && el.innerText.trim().length > 2) {
+                question = el.innerText.trim();
+                break;
+            }
+        }
+        if(!question) return;
+
+        const ansBox = document.getElementById('v8-ans-box');
+        if(ansBox.dataset.lastQ === question) return;
+        ansBox.dataset.lastQ = question;
+        ansBox.innerText = "Mencari...";
+
+        // Cek Data Lokal (Smart Sync)
+        const found = config.quizitData.find(x => question.toLowerCase().includes(x.q) || x.q.includes(question.toLowerCase()));
+        if(found) {
+            ansBox.innerText = "[Sync] Jawaban: " + found.a;
+            handleAutoClick(found.a);
+            return;
+        }
+
+        // Tanya Gemini (Jika tidak ada di Sync)
+        try {
+            const optEls = Array.from(document.querySelectorAll('.option, [data-test="option"], .p-option, [class*="answer-option"]'))
+                                .filter(el => el.offsetParent !== null);
+            const options = optEls.map(el => el.innerText.trim());
+            
+            const promptText = `Pilih satu jawaban tepat: ${options.join(", ")}. Soal: ${question}. Jawab hanya teks pilihannya saja.`;
+            const res = await fetch(GEMINI_URL, {
+                method: "POST",
+                headers: {"Content-Type": "application/json"},
+                body: JSON.stringify({ contents: [{ parts: [{ text: promptText }] }] })
+            });
+            const data = await res.json();
+            const aiAns = data.candidates[0].content.parts[0].text.trim();
+            ansBox.innerText = "[AI] Jawaban: " + aiAns;
+            handleAutoClick(aiAns);
+        } catch(e) { ansBox.innerText = "Error API (Check Key)"; }
+    }
+
+    function handleAutoClick(answer) {
+        if(!config.autoAnswer) return;
+        const delay = Math.floor(Math.random() * (config.delayMax - config.delayMin + 1)) + config.delayMin;
+        setTimeout(() => {
+            const optEls = document.querySelectorAll('.option, [data-test="option"], .p-option, [class*="answer-option"]');
+            for(let el of optEls) {
+                const txt = el.innerText.trim().toLowerCase();
+                if(txt === answer.toLowerCase() || txt.includes(answer.toLowerCase())) {
+                    el.click();
+                    break;
+                }
+            }
+        }, delay);
+    }
+
+    /* --- UI & STYLE --- */
     const style = document.createElement('style');
     style.innerHTML = `
-        #zynai-menu { position:fixed; top:10px; right:10px; width:220px; background:#111; color:#fff; border-radius:10px; z-index:999999; font-family:sans-serif; border:1px solid #00ff88; box-shadow:0 0 15px rgba(0,255,136,0.5); }
-        .zyn-header { background:#00ff88; color:#000; padding:10px; font-weight:bold; text-align:center; border-radius:10px 10px 0 0; font-size:12px; }
-        .zyn-body { padding:10px; }
-        .zyn-btn { width:100%; padding:8px; margin-bottom:5px; background:#222; color:#00ff88; border:1px solid #00ff88; border-radius:5px; cursor:pointer; font-size:10px; font-weight:bold; }
-        .zyn-active { background:#00ff88 !important; color:#000 !important; }
-        #zyn-ans-box { background:#000; padding:8px; border-radius:5px; font-size:11px; color:#00ff88; border:1px solid #333; min-height:40px; }
-        #zyn-logo-btn { position:fixed; bottom:10px; left:10px; width:25px; height:25px; background:rgba(0,255,136,0.1); border:1px solid rgba(0,255,136,0.1); border-radius:5px; z-index:1000000; cursor:pointer; display:flex; align-items:center; justify-content:center; color:rgba(0,255,136,0.2); font-weight:bold; font-size:14px; }
+        #zynai-v8-menu{position:fixed;top:80px;right:20px;width:230px;background:#0b0b0b;color:#fff;border-radius:8px;z-index:999999;font-family:sans-serif;border:1px solid #00ff88;box-shadow:0 0 15px rgba(0,255,136,0.2);}
+        #v8-header{background:#00ff88;color:#000;padding:8px;font-weight:bold;text-align:center;font-size:11px;}
+        #v8-body{padding:10px;}
+        .v8-btn{width:100%;padding:7px;margin-bottom:5px;background:#1a1a1a;color:#00ff88;border:1px solid #00ff88;border-radius:4px;cursor:pointer;font-size:10px;font-weight:bold;}
+        .v8-active{background:#00ff88 !important;color:#000 !important;}
+        #v8-ans-box{background:#000;padding:8px;border-radius:4px;font-size:11px;color:#00ff88;border:1px solid #222;min-height:35px;margin-top:5px;}
+        
+        /* Logo Z Super Transparan */
+        #v8-hide-btn { 
+            position:fixed; bottom:15px; left:15px; z-index:1000000; cursor:pointer; 
+            color: rgba(255,255,255,0.08); font-weight: bold; font-size: 16px; 
+            user-select:none; background:none; border:none;
+        }
     `;
     document.head.appendChild(style);
 
     const menu = document.createElement('div');
-    menu.id = 'zynai-menu';
-    menu.innerHTML = `<div class="zyn-header">ZYNAI LITE PRO</div><div class="zyn-body">
-        <button id="btn-auto" class="zyn-btn">Auto Answer: OFF</button>
-        <button id="btn-incog" class="zyn-btn">Incognito: OFF</button>
-        <button id="btn-sync" class="zyn-btn">Smart Sync (Paste All)</button>
-        <div id="zyn-ans-box">Ready.</div>
-    </div>`;
+    menu.id = 'zynai-v8-menu';
+    menu.innerHTML = `
+        <div id="v8-header">ZYNAI LITE PRO</div>
+        <div id="v8-body">
+            <button id="v8-auto-tg" class="v8-btn">Auto Answer: OFF</button>
+            <button id="v8-inc-tg" class="v8-btn">Incognito: OFF</button>
+            <button id="v8-sync-btn" class="v8-btn" style="border-color:#ffcc00;color:#ffcc00">Smart Sync (Quizit)</button>
+            <div id="v8-ans-box">Ready.</div>
+        </div>
+    `;
     document.body.appendChild(menu);
 
-    const logoBtn = document.createElement('div');
-    logoBtn.id = 'zyn-logo-btn';
-    logoBtn.innerText = 'Z';
-    document.body.appendChild(logoBtn);
+    const hideBtn = document.createElement('div');
+    hideBtn.id = 'v8-hide-btn';
+    hideBtn.innerText = 'Z';
+    document.body.appendChild(hideBtn);
 
-    logoBtn.onclick = () => {
+    hideBtn.onclick = () => {
         config.isHidden = !config.isHidden;
         menu.style.display = config.isHidden ? 'none' : 'block';
+        hideBtn.style.color = config.isHidden ? 'rgba(255,255,255,0.3)' : 'rgba(255,255,255,0.08)';
     };
 
-    /* --- EVENT LISTENERS --- */
-    document.getElementById('btn-auto').onclick = function() {
+    document.getElementById('v8-auto-tg').onclick = function() {
         config.autoAnswer = !config.autoAnswer;
-        this.classList.toggle('zyn-active');
+        this.classList.toggle('v8-active');
         this.innerText = `Auto Answer: ${config.autoAnswer ? 'ON' : 'OFF'}`;
     };
-    document.getElementById('btn-incog').onclick = function() {
+    document.getElementById('v8-inc-tg').onclick = function() {
         config.incognito = !config.incognito;
-        this.classList.toggle('zyn-active');
+        this.classList.toggle('v8-active');
         this.innerText = `Incognito: ${config.incognito ? 'ON' : 'OFF'}`;
         if(config.incognito) enableIncognito();
     };
-    document.getElementById('btn-sync').onclick = () => {
-        const raw = prompt("Tempel data Quizit:");
-        if(raw) {
-            const parts = raw.split(/\n\s*\n/);
-            config.localAnswers = parts.map(p => {
-                const lines = p.split('\n').filter(l => l.trim().length > 0);
-                return lines.length >= 2 ? { q: lines[0].trim().toLowerCase(), a: lines[lines.length-1].trim() } : null;
-            }).filter(x => x);
-            alert(`Berhasil sinkron ${config.localAnswers.length} soal.`);
-        }
-    };
+    document.getElementById('v8-sync-btn').onclick = processSmartSync;
 
-    setInterval(solve, 2000);
+    setInterval(solve, 1500);
 })();
