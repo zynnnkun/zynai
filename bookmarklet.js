@@ -1,137 +1,116 @@
 javascript:(function(){
-    if(document.getElementById('zynai-v10-menu')) return;
+    if(document.getElementById('zynai-v12-menu')) return;
 
-    /* --- GANTI API KEY KAMU DI SINI --- */
+    /* --- CONFIG & API --- */
     const GEMINI_KEY = "AIzaSyA7N_MnsxVTC0B6ZoqTqgaiIbpSYJhTruc"; 
     const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_KEY}`;
+    let config = { auto: false, stealth: false, syncData: [], lastQ: "" };
 
-    let config = { autoAnswer: false, incognito: true, delayMin: 500, delayMax: 1200, isHidden: false, quizitData: [] };
-
-    /* --- 1. INVISIBLE SWITCH (ANTI-CHEAT) --- */
-    function initAntiCheat() {
-        const bypass = () => {
-            try {
-                Object.defineProperty(document, 'visibilityState', {get: () => 'visible', configurable: true});
-                Object.defineProperty(document, 'hidden', {get: () => false, configurable: true});
-                Object.defineProperty(document, 'webkitVisibilityState', {get: () => 'visible', configurable: true});
-                document.hasFocus = () => true;
-            } catch(e) {}
-        };
-        bypass();
-        
-        const events = ['visibilitychange', 'webkitvisibilitychange', 'blur', 'focus', 'mouseleave'];
-        events.forEach(ev => {
-            window.addEventListener(ev, e => { e.stopImmediatePropagation(); }, true);
-            document.addEventListener(ev, e => { e.stopImmediatePropagation(); }, true);
+    /* --- CORE FUNCTIONS --- */
+    function initStealth() {
+        const p = (o, k, v) => Object.defineProperty(o, k, {get: () => v, configurable: true});
+        p(document, 'visibilityState', 'visible'); p(document, 'hidden', false);
+        document.hasFocus = () => true;
+        ['visibilitychange','webkitvisibilitychange','blur','focus','mouseleave'].forEach(ev => {
+            window.addEventListener(ev, e => { if(config.stealth) e.stopImmediatePropagation(); }, true);
         });
-
-        // Matikan listener bawaan web kuis
-        window.onblur = null;
-        window.onfocus = null;
-        document.onvisibilitychange = null;
-        
-        setInterval(bypass, 100);
-        console.log("🛡️ Invisible Switch Active");
+        setInterval(() => { if(config.stealth) p(document, 'visibilityState', 'visible'); }, 200);
     }
 
-    /* --- 2. LOGIKA SOLVER --- */
     async function solve() {
-        const qSelectors = ['.question-text', '[data-test="question-text"]', '.q-text', '.custom-question-style'];
-        let question = "";
-        for(let sel of qSelectors) {
-            const el = document.querySelector(sel);
-            if(el && el.innerText.trim().length > 3) { question = el.innerText.trim(); break; }
+        /* Selector Wayground & Quizizz New */
+        const qEl = document.querySelector('.question-text, [data-test="question-text"], div[class*="question-text"], .q-text');
+        if(!qEl) return;
+        const qText = qEl.innerText.trim();
+        const box = document.getElementById('v12-ans-box');
+        if(config.lastQ === qText) return;
+        config.lastQ = qText;
+        box.innerText = "🔍 Mencari...";
+
+        const optEls = Array.from(document.querySelectorAll('.option, [data-test="option"], .p-option, div[class*="answer-option"]'))
+                            .filter(el => el.offsetParent !== null);
+        const options = optEls.map(el => el.innerText.trim());
+
+        /* 1. Cek Local Sync Data (Quizit) */
+        const localMatch = config.syncData.find(d => d.q.toLowerCase().includes(qText.toLowerCase()) || qText.toLowerCase().includes(d.q.toLowerCase()));
+        if(localMatch) {
+            displayAns(localMatch.a, "SYNC", optEls);
+            return;
         }
-        if(!question) return;
 
-        const ansBox = document.getElementById('v10-ans-box');
-        if(ansBox.dataset.lastQ === question) return;
-        ansBox.dataset.lastQ = question;
-        ansBox.innerText = "⏳ Sedang berpikir...";
-
+        /* 2. Tanya Gemini AI */
         try {
-            const optEls = Array.from(document.querySelectorAll('.option, [data-test="option"], .p-option'))
-                                .filter(el => el.offsetParent !== null);
-            const options = optEls.map(el => el.innerText.trim());
-            
-            const response = await fetch(API_URL, {
+            const res = await fetch(API_URL, {
                 method: "POST",
-                headers: {"Content-Type": "application/json"},
-                body: JSON.stringify({
-                    contents: [{ parts: [{ text: `Soal: ${question}\nPilihan: ${options.join(", ")}\nJawab dengan teks jawabannya saja, singkat!` }] }]
-                })
+                body: JSON.stringify({contents: [{parts: [{text: `Soal: ${qText}\nOpsi: ${options.join(", ")}\nJawab dengan teks jawabannya saja, singkat!`}]}]})
             });
+            const d = await res.json();
+            const aiAns = d.candidates[0].content.parts[0].text.trim();
+            displayAns(aiAns, "AI", optEls);
+        } catch(e) { box.innerText = "❌ API Limit/Error"; }
+    }
 
-            const data = await response.json();
-            if(data.error) throw new Error(data.error.message);
-            
-            const aiAns = data.candidates[0].content.parts[0].text.trim();
-            ansBox.innerText = "✅ JAWABAN: " + aiAns;
-
-            if(config.autoAnswer) {
-                const delay = Math.floor(Math.random() * (config.delayMax - config.delayMin + 1)) + config.delayMin;
-                setTimeout(() => {
-                    for(let el of optEls) {
-                        if(el.innerText.trim().toLowerCase().includes(aiAns.toLowerCase()) || aiAns.toLowerCase().includes(el.innerText.trim().toLowerCase())) {
-                            el.click(); break;
-                        }
+    function displayAns(ans, src, optEls) {
+        const box = document.getElementById('v12-ans-box');
+        box.innerHTML = `<b style="color:#fff">[${src}]</b>: ${ans}`;
+        if(config.auto) {
+            setTimeout(() => {
+                for(let el of optEls) {
+                    if(el.innerText.toLowerCase().includes(ans.toLowerCase()) || ans.toLowerCase().includes(el.innerText.toLowerCase())) {
+                        el.click(); break;
                     }
-                }, delay);
-            }
-        } catch(e) { 
-            ansBox.innerText = "❌ API Error: Check Key/Quota"; 
-            console.error(e);
+                }
+            }, 1000);
         }
     }
 
-    /* --- 3. UI STYLE & POSITION --- */
+    /* --- UI & STYLES --- */
     const style = document.createElement('style');
     style.innerHTML = `
-        #zynai-v10-menu{position:fixed;top:20px;right:20px;width:220px;background:#0a0a0a;color:#fff;border-radius:12px;z-index:999999;font-family:sans-serif;border:1px solid #00ff88;box-shadow:0 10px 30px rgba(0,0,0,0.8);}
-        #v10-header{background:#00ff88;color:#000;padding:10px;font-weight:bold;text-align:center;border-radius:12px 12px 0 0;font-size:11px;}
-        .v10-btn{width:90%;padding:8px;margin:5px 5%;background:#111;color:#00ff88;border:1px solid #00ff88;border-radius:6px;cursor:pointer;font-size:10px;font-weight:bold;transition:0.2s;}
-        .v10-btn:hover{background:#00ff88;color:#000;}
-        #v10-ans-box{background:#000;padding:10px;font-size:11px;color:#00ff88;min-height:40px;text-align:center;border-top:1px solid #222;}
-        
-        /* Logo Z di Pojok Kanan Bawah */
-        #v10-hide-btn { 
-            position:fixed !important; bottom:15px !important; right:15px !important; 
-            z-index:1000000 !important; cursor:pointer; 
-            color: rgba(255,255,255,0.1); font-weight: bold; font-size: 16px; 
-            background:none; border:none; user-select:none;
-        }
+        #zynai-v12-menu{position:fixed;top:50px;right:20px;width:210px;background:#0d0d0d;color:#0f8;border:1px solid #0f8;z-index:999999;font-family:monospace;padding:12px;border-radius:10px;box-shadow:0 0 15px rgba(0,255,136,0.2);}
+        .v12-btn{width:100%;margin:4px 0;background:#1a1a1a;color:#0f8;border:1px solid #0f8;font-size:10px;padding:7px;cursor:pointer;border-radius:4px;font-weight:bold;}
+        .v12-btn:active{background:#0f8;color:#000;}
+        #v12-ans-box{background:#000;padding:8px;font-size:11px;margin-top:8px;border:1px solid #222;min-height:35px;border-radius:4px;}
+        #v12-z{position:fixed;bottom:10px;right:10px;z-index:1000000;color:rgba(255,255,255,0.05);cursor:pointer;font-size:14px;font-family:sans-serif;}
     `;
     document.head.appendChild(style);
 
-    const menu = document.createElement('div');
-    menu.id = 'zynai-v10-menu';
-    menu.innerHTML = `
-        <div id="v10-header">ZYNAI V10 PRO</div>
-        <div style="padding:10px;">
-            <button id="v10-auto-tg" class="v10-btn">AUTO CLICK: OFF</button>
-            <div id="v10-ans-box">Ready.</div>
-        </div>
+    const m = document.createElement('div');
+    m.id = 'zynai-v12-menu';
+    m.innerHTML = `
+        <div style="text-align:center;font-weight:bold;border-bottom:1px solid #222;margin-bottom:8px;padding-bottom:5px;">ZYNAI V12 LITE</div>
+        <button id="v12-tg-at" class="v12-btn">AUTO CLICK: OFF</button>
+        <button id="v12-tg-st" class="v12-btn">STEALTH: OFF</button>
+        <button id="v12-sync" class="v12-btn" style="color:#ff0;border-color:#ff0">SYNC QUIZIT</button>
+        <div id="v12-ans-box">Ready.</div>
     `;
-    document.body.appendChild(menu);
+    document.body.appendChild(m);
 
-    const hideBtn = document.createElement('div');
-    hideBtn.id = 'v10-hide-btn';
-    hideBtn.innerText = 'Z';
-    document.body.appendChild(hideBtn);
+    const z = document.createElement('div'); z.id = 'v12-z'; z.innerText = 'Z'; document.body.appendChild(z);
+    z.onclick = () => m.style.display = m.style.display === 'none' ? 'block' : 'none';
 
-    hideBtn.onclick = () => {
-        config.isHidden = !config.isHidden;
-        menu.style.display = config.isHidden ? 'none' : 'block';
-        hideBtn.style.color = config.isHidden ? 'rgba(0,255,136,0.4)' : 'rgba(255,255,255,0.1)';
+    /* --- INTERACTION --- */
+    document.getElementById('v12-tg-at').onclick = function() { 
+        config.auto = !config.auto; this.innerText = `AUTO CLICK: ${config.auto?'ON':'OFF'}`;
+        this.style.background = config.auto ? "#0f8" : "#1a1a1a";
+        this.style.color = config.auto ? "#000" : "#0f8";
+    };
+    document.getElementById('v12-tg-st').onclick = function() { 
+        config.stealth = !config.stealth; this.innerText = `STEALTH: ${config.stealth?'ON':'OFF'}`;
+        this.style.background = config.stealth ? "#0f8" : "#1a1a1a";
+        this.style.color = config.stealth ? "#000" : "#0f8";
+    };
+    document.getElementById('v12-sync').onclick = () => {
+        let raw = prompt("Tempel data (Format: Soal|Jawaban):");
+        if(raw) {
+            raw.split('\n').forEach(l => {
+                let p = l.split('|');
+                if(p.length>=2) config.syncData.push({q:p[0].trim(), a:p[1].trim()});
+            });
+            alert("Synced " + config.syncData.length + " items");
+        }
     };
 
-    document.getElementById('v10-auto-tg').onclick = function() {
-        config.autoAnswer = !config.autoAnswer;
-        this.innerText = `AUTO CLICK: ${config.autoAnswer ? 'ON' : 'OFF'}`;
-        this.style.background = config.autoAnswer ? '#00ff88' : '#111';
-        this.style.color = config.autoAnswer ? '#000' : '#00ff88';
-    };
-
-    initAntiCheat();
+    initStealth();
     setInterval(solve, 1500);
 })();
