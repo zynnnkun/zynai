@@ -1,91 +1,134 @@
 (function(){
-    if(document.getElementById('ai-helper-menu')) return;
+    if(document.getElementById('zynai-menu')) return;
 
-    const GEMINI_API_KEY = "AIzaSyA7N_MnsxVTC0B6ZoqTqgaiIbpSYJhTruc";
-    const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`;
+    /* --- KONFIGURASI --- */
+    const GEMINI_API_KEY = "AIzaSyA7N_MnsxVTC0B6ZoqTqgaiIbpSYJhTruc"; // API Key kamu
+    const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_API_KEY}`;
 
+    let config = {
+        autoAnswer: false,
+        incognito: false,
+        delay: 1, // Default delay 1ms sesuai screenshot
+        localAnswers: []
+    };
+
+    /* --- FITUR 1: INVISIBLE SWITCH (ANTI-CHEAT) --- */
+    function enableIncognito() {
+        const bypass = () => {
+            try {
+                Object.defineProperty(document, 'visibilityState', {get: () => 'visible', configurable: true});
+                Object.defineProperty(document, 'hidden', {get: () => false, configurable: true});
+                document.hasFocus = () => true;
+            } catch(e) {}
+        };
+        bypass();
+        // Memblokir event deteksi sesuai instruksi di screenshot
+        const events = ['visibilitychange', 'webkitvisibilitychange', 'blur', 'focus', 'mouseleave'];
+        events.forEach(ev => {
+            window.addEventListener(ev, e => { if(config.incognito) e.stopImmediatePropagation(); }, true);
+        });
+        setInterval(() => { if(config.incognito) bypass(); }, 100);
+    }
+
+    /* --- FITUR 2: SMART SYNC (QUIZIT FORMAT) --- */
+    async function smartSync() {
+        const rawData = prompt("Tempelkan data jawaban dari Quizit di sini (Format: Soal|Jawaban):");
+        if(rawData) {
+            const lines = rawData.split('\n');
+            config.localAnswers = lines.map(l => {
+                const parts = l.split('|');
+                return parts.length >= 2 ? { q: parts[0].trim().toLowerCase(), a: parts[1].trim() } : null;
+            }).filter(x => x);
+            alert(`Smart Sync Berhasil! ${config.localAnswers.length} soal terdeteksi.`);
+        }
+    }
+
+    /* --- FITUR 3: LOGIKA PENCARI JAWABAN (GEMINI + LOCAL) --- */
+    async function getAnswer(question, options) {
+        // Cek database lokal (Smart Sync) dulu
+        const found = config.localAnswers.find(x => question.toLowerCase().includes(x.q) || x.q.includes(question.toLowerCase()));
+        if (found) return { text: found.a, source: "Smart Sync" };
+
+        // Jika tidak ada di lokal, tanya Gemini
+        const promptText = `Pilih jawaban yang benar dari opsi ini: ${options.join(", ")}. Soal: ${question}. Jawab hanya dengan teks pilihannya saja.`;
+        try {
+            const res = await fetch(GEMINI_URL, {
+                method: "POST",
+                headers: {"Content-Type": "application/json"},
+                body: JSON.stringify({ contents: [{ parts: [{ text: promptText }] }] })
+            });
+            const data = await res.json();
+            return { text: data.candidates[0].content.parts[0].text.trim(), source: "Gemini AI" };
+        } catch(e) { return { text: null, source: "Error" }; }
+    }
+
+    async function solve() {
+        const qEl = document.querySelector('.question-text, [data-test="question-text"], .q-text, .question-container-text');
+        if(!qEl) return;
+        
+        const question = qEl.innerText.trim();
+        const ansBox = document.getElementById('zyn-ans-box');
+        if(ansBox.dataset.lastQ === question) return;
+        ansBox.dataset.lastQ = question;
+
+        const optEls = Array.from(document.querySelectorAll('.option, [data-test="option"], .p-option, [class*="answer-option"]'))
+                            .filter(el => el.offsetParent !== null);
+        const options = optEls.map(el => el.innerText.trim());
+
+        const result = await getAnswer(question, options);
+        ansBox.innerText = `[${result.source}] Jawaban: ${result.text}`;
+
+        if(config.autoAnswer && result.text) {
+            setTimeout(() => {
+                for(let el of optEls) {
+                    if(el.innerText.trim().toLowerCase().includes(result.text.toLowerCase())) {
+                        el.click(); // Klik biasa
+                        el.dispatchEvent(new Event('click', {bubbles: true})); // Force click event sesuai screenshot
+                        break;
+                    }
+                }
+            }, config.delay);
+        }
+    }
+
+    /* --- UI INTERFACE --- */
     const style = document.createElement('style');
     style.innerHTML = `
-        #ai-helper-menu{position:fixed;top:80px;right:20px;width:250px;background:#1a1a2e;color:#fff;border-radius:12px;z-index:999999;font-family:sans-serif;box-shadow:0 4px 24px rgba(99,102,241,0.3);border:1px solid #3b3b5c;}
-        #ai-header{background:linear-gradient(90deg,#6366f1,#8b5cf6);padding:10px 14px;cursor:move;font-weight:bold;display:flex;justify-content:space-between;align-items:center;font-size:13px;user-select:none;border-radius:12px 12px 0 0;}
-        #ai-body{padding:12px;}
-        #ai-ans-box{background:#0f0f1a;padding:10px;border-radius:8px;font-size:12px;color:#a5b4fc;border:1px solid #3b3b5c;min-height:50px;margin-bottom:10px;word-wrap:break-word;line-height:1.6;}
-        #ai-scan-btn{background:linear-gradient(90deg,#6366f1,#8b5cf6);color:#fff;border:none;padding:8px;border-radius:8px;font-size:12px;font-weight:bold;cursor:pointer;width:100%;}
+        #zynai-menu { position:fixed; top:10px; right:10px; width:220px; background:#111; color:#fff; border-radius:10px; z-index:999999; font-family:sans-serif; border:1px solid #00ff88; box-shadow:0 0 15px rgba(0,255,136,0.5); }
+        .zyn-header { background:#00ff88; color:#000; padding:10px; font-weight:bold; text-align:center; border-radius:10px 10px 0 0; font-size:12px; }
+        .zyn-body { padding:10px; }
+        .zyn-btn { width:100%; padding:8px; margin-bottom:5px; background:#222; color:#00ff88; border:1px solid #00ff88; border-radius:5px; cursor:pointer; font-size:10px; font-weight:bold; }
+        .zyn-active { background:#00ff88 !important; color:#000 !important; }
+        #zyn-ans-box { background:#000; padding:8px; border-radius:5px; font-size:11px; color:#00ff88; border:1px solid #333; min-height:40px; }
     `;
     document.head.appendChild(style);
 
     const menu = document.createElement('div');
-    menu.id = 'ai-helper-menu';
+    menu.id = 'zynai-menu';
     menu.innerHTML = `
-        <div id="ai-header">
-            <span>🤖 AI Helper</span>
-            <div style="display:flex;gap:10px;">
-                <span id="ai-min" style="cursor:pointer">—</span>
-                <span id="ai-cls" style="cursor:pointer">✕</span>
-            </div>
-        </div>
-        <div id="ai-body">
-            <div id="ai-ans-box">Klik tombol di bawah untuk scan soal.</div>
-            <button id="ai-scan-btn">🔍 Scan Soal</button>
+        <div class="zyn-header">ZYNAI LITE PRO</div>
+        <div class="zyn-body">
+            <button id="btn-auto" class="zyn-btn">Jawab Otomatis: OFF</button>
+            <button id="btn-incog" class="zyn-btn">Incognito: OFF</button>
+            <button id="btn-sync" class="zyn-btn">Smart Sync (Paste All)</button>
+            <div id="zyn-ans-box">Ready.</div>
         </div>
     `;
     document.body.appendChild(menu);
 
-    document.getElementById('ai-min').onclick = () => {
-        const b = document.getElementById('ai-body');
-        b.style.display = b.style.display === 'none' ? 'block' : 'none';
+    /* --- EVENT LISTENERS --- */
+    document.getElementById('btn-auto').onclick = function() {
+        config.autoAnswer = !config.autoAnswer;
+        this.classList.toggle('zyn-active');
+        this.innerText = `Jawab Otomatis: ${config.autoAnswer ? 'ON' : 'OFF'}`;
     };
-    document.getElementById('ai-cls').onclick = () => menu.remove();
-
-    let drag=false,ox,oy;
-    document.getElementById('ai-header').onmousedown = e => { drag=true; ox=e.clientX-menu.offsetLeft; oy=e.clientY-menu.offsetTop; };
-    document.onmousemove = e => { if(drag){ menu.style.left=(e.clientX-ox)+'px'; menu.style.top=(e.clientY-oy)+'px'; menu.style.right='auto'; }};
-    document.onmouseup = () => drag=false;
-
-    document.getElementById('ai-scan-btn').onclick = async () => {
-        const box = document.getElementById('ai-ans-box');
-        box.style.color = '#facc15';
-        box.innerText = '⏳ Membaca soal...';
-
-        let question = '';
-        const qSels = ['.question-text','[data-test="question-text"]','.q-text','div[class*="question"]'];
-        for(let s of qSels){
-            const el = document.querySelector(s);
-            if(el && el.innerText.trim().length > 5){ question = el.innerText.trim(); break; }
-        }
-        if(!question){
-            let max=0;
-            document.querySelectorAll('div,p,span').forEach(el => {
-                const t = el.innerText?.trim();
-                if(t && t.length > max && /\?/.test(t) && el.offsetParent){ question=t; max=t.length; }
-            });
-        }
-        if(!question){ box.style.color='#f87171'; box.innerText='❌ Soal tidak ditemukan.'; return; }
-
-        let options = [];
-        const oSels = ['.option','[data-test="option"]','.p-option','div[class*="option"]','div[role="button"]'];
-        for(let s of oSels){
-            const els = Array.from(document.querySelectorAll(s)).filter(e => e.offsetParent && e.innerText.trim().length > 0 && e.innerText.trim().length < 200);
-            if(els.length >= 2){ options = els.map(e => e.innerText.trim()); break; }
-        }
-
-        const prompt = options.length > 0
-            ? `Pertanyaan: "${question}"\nPilihan: ${options.map((o,i)=>`${i+1}. ${o}`).join(', ')}\nJawab singkat: pilihan mana yang benar dan alasan 1 kalimat.`
-            : `Pertanyaan: "${question}"\nJawab singkat dalam 1-2 kalimat.`;
-
-        try {
-            const res = await fetch(API_URL, {
-                method: 'POST',
-                headers: {'Content-Type':'application/json'},
-                body: JSON.stringify({ contents:[{ parts:[{ text: prompt }] }] })
-            });
-            const data = await res.json();
-            const reply = data?.candidates?.[0]?.content?.parts?.[0]?.text || 'Tidak ada jawaban.';
-            box.style.color = '#a5b4fc';
-            box.innerText = '💡 ' + reply;
-        } catch(e) {
-            box.style.color = '#f87171';
-            box.innerText = '❌ Error: Gagal menghubungi API.';
-        }
+    document.getElementById('btn-incog').onclick = function() {
+        config.incognito = !config.incognito;
+        this.classList.toggle('zyn-active');
+        this.innerText = `Incognito: ${config.incognito ? 'ON' : 'OFF'}`;
+        if(config.incognito) enableIncognito();
     };
+    document.getElementById('btn-sync').onclick = smartSync;
+
+    setInterval(solve, 1500);
 })();
