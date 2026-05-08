@@ -1,115 +1,100 @@
 javascript:(function(){
-    if(document.getElementById('zynai-v12-menu')) return;
+    if(document.getElementById('zynai-v13-menu')) return;
 
-    /* --- CONFIG & API --- */
+    /* Konfigurasi dari Guide */
     const GEMINI_KEY = "AIzaSyA7N_MnsxVTC0B6ZoqTqgaiIbpSYJhTruc"; 
     const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_KEY}`;
-    let config = { auto: false, stealth: false, syncData: [], lastQ: "" };
+    let config = { auto: false, stealth: true, syncData: [], lastQ: "", delay: 800 };
 
-    /* --- CORE FUNCTIONS --- */
+    /* 🛡️ Stealth Anti-Cheat (Sesuai Guide v8) */
     function initStealth() {
-        const p = (o, k, v) => Object.defineProperty(o, k, {get: () => v, configurable: true});
-        p(document, 'visibilityState', 'visible'); p(document, 'hidden', false);
-        document.hasFocus = () => true;
-        ['visibilitychange','webkitvisibilitychange','blur','focus','mouseleave'].forEach(ev => {
-            window.addEventListener(ev, e => { if(config.stealth) e.stopImmediatePropagation(); }, true);
+        const bypass = () => {
+            Object.defineProperty(document, 'visibilityState', {get: () => 'visible', configurable: true});
+            Object.defineProperty(document, 'hidden', {get: () => false, configurable: true});
+        };
+        bypass();
+        ['visibilitychange', 'blur', 'focus'].forEach(e => {
+            window.addEventListener(e, x => { if(config.stealth) x.stopImmediatePropagation(); }, true);
         });
-        setInterval(() => { if(config.stealth) p(document, 'visibilityState', 'visible'); }, 200);
+        setInterval(bypass, 500); // Interval 500ms sesuai guide
     }
 
+    /* 🧠 Smart Sync (Logika deteksi otomatis) */
+    function smartSync() {
+        let raw = prompt("Tempel data Quizit (Soal & Jawaban berurutan):");
+        if(!raw) return;
+        let lines = raw.split('\n').filter(l => l.trim().length > 0);
+        for(let i=0; i < lines.length; i++) {
+            if(lines[i].includes('?') || lines[i].length > 20) {
+                if(lines[i+1]) config.syncData.push({q: lines[i].trim(), a: lines[i+1].trim()});
+            }
+        }
+        alert(`Berhasil sinkron ${config.syncData.length} data.`);
+    }
+
+    /* 🤖 Auto Answer (Multi-Selector & Stealth Click) */
     async function solve() {
-        /* Selector Wayground & Quizizz New */
-        const qEl = document.querySelector('.question-text, [data-test="question-text"], div[class*="question-text"], .q-text');
+        const qSelectors = ['.question-text', '[data-test="question-text"]', 'div[class*="question-text"]', '.text-container'];
+        let qEl = null;
+        for(let s of qSelectors) { qEl = document.querySelector(s); if(qEl) break; }
+        
         if(!qEl) return;
-        const qText = qEl.innerText.trim();
-        const box = document.getElementById('v12-ans-box');
+        let qText = qEl.innerText.trim();
+        const box = document.getElementById('v13-ans-box');
         if(config.lastQ === qText) return;
         config.lastQ = qText;
-        box.innerText = "🔍 Mencari...";
+        box.innerText = "⏳ Memproses...";
 
-        const optEls = Array.from(document.querySelectorAll('.option, [data-test="option"], .p-option, div[class*="answer-option"]'))
-                            .filter(el => el.offsetParent !== null);
-        const options = optEls.map(el => el.innerText.trim());
+        /* Cek Sync Data Terlebih Dahulu (Prioritas agar tidak API Error) */
+        let match = config.syncData.find(d => qText.includes(d.q) || d.q.includes(qText));
+        if(match) { display(match.a, "SYNC"); return; }
 
-        /* 1. Cek Local Sync Data (Quizit) */
-        const localMatch = config.syncData.find(d => d.q.toLowerCase().includes(qText.toLowerCase()) || qText.toLowerCase().includes(d.q.toLowerCase()));
-        if(localMatch) {
-            displayAns(localMatch.a, "SYNC", optEls);
-            return;
-        }
-
-        /* 2. Tanya Gemini AI */
+        /* API Fallback */
         try {
+            const opts = Array.from(document.querySelectorAll('.option, [data-test="option"], .p-option')).map(e => e.innerText.trim());
             const res = await fetch(API_URL, {
                 method: "POST",
-                body: JSON.stringify({contents: [{parts: [{text: `Soal: ${qText}\nOpsi: ${options.join(", ")}\nJawab dengan teks jawabannya saja, singkat!`}]}]})
+                body: JSON.stringify({contents: [{parts: [{text: `Soal: ${qText}. Opsi: ${opts.join(",")}. Jawab singkat!`}]}]})
             });
             const d = await res.json();
-            const aiAns = d.candidates[0].content.parts[0].text.trim();
-            displayAns(aiAns, "AI", optEls);
-        } catch(e) { box.innerText = "❌ API Limit/Error"; }
+            const ans = d.candidates[0].content.parts[0].text.trim();
+            display(ans, "AI");
+        } catch(e) { box.innerText = "❌ API Limit (Gunakan Sync)"; }
     }
 
-    function displayAns(ans, src, optEls) {
-        const box = document.getElementById('v12-ans-box');
-        box.innerHTML = `<b style="color:#fff">[${src}]</b>: ${ans}`;
+    function display(ans, src) {
+        const box = document.getElementById('v13-ans-box');
+        box.innerHTML = `<span style="color:#0f8">[${src}]</span>: ${ans}`;
         if(config.auto) {
             setTimeout(() => {
-                for(let el of optEls) {
-                    if(el.innerText.toLowerCase().includes(ans.toLowerCase()) || ans.toLowerCase().includes(el.innerText.toLowerCase())) {
-                        el.click(); break;
+                const els = document.querySelectorAll('.option, .p-option, [data-test="option"]');
+                for(let el of els) {
+                    if(el.innerText.toLowerCase().includes(ans.toLowerCase())) {
+                        /* Stealth Click (Sesuai Guide v8) */
+                        el.click();
+                        el.dispatchEvent(new MouseEvent('mousedown', {bubbles: true}));
+                        el.dispatchEvent(new MouseEvent('mouseup', {bubbles: true}));
+                        break;
                     }
                 }
-            }, 1000);
+            }, config.delay);
         }
     }
 
-    /* --- UI & STYLES --- */
-    const style = document.createElement('style');
-    style.innerHTML = `
-        #zynai-v12-menu{position:fixed;top:50px;right:20px;width:210px;background:#0d0d0d;color:#0f8;border:1px solid #0f8;z-index:999999;font-family:monospace;padding:12px;border-radius:10px;box-shadow:0 0 15px rgba(0,255,136,0.2);}
-        .v12-btn{width:100%;margin:4px 0;background:#1a1a1a;color:#0f8;border:1px solid #0f8;font-size:10px;padding:7px;cursor:pointer;border-radius:4px;font-weight:bold;}
-        .v12-btn:active{background:#0f8;color:#000;}
-        #v12-ans-box{background:#000;padding:8px;font-size:11px;margin-top:8px;border:1px solid #222;min-height:35px;border-radius:4px;}
-        #v12-z{position:fixed;bottom:10px;right:10px;z-index:1000000;color:rgba(255,255,255,0.05);cursor:pointer;font-size:14px;font-family:sans-serif;}
-    `;
-    document.head.appendChild(style);
-
+    /* UI Minimalis */
     const m = document.createElement('div');
-    m.id = 'zynai-v12-menu';
-    m.innerHTML = `
-        <div style="text-align:center;font-weight:bold;border-bottom:1px solid #222;margin-bottom:8px;padding-bottom:5px;">ZYNAI V12 LITE</div>
-        <button id="v12-tg-at" class="v12-btn">AUTO CLICK: OFF</button>
-        <button id="v12-tg-st" class="v12-btn">STEALTH: OFF</button>
-        <button id="v12-sync" class="v12-btn" style="color:#ff0;border-color:#ff0">SYNC QUIZIT</button>
-        <div id="v12-ans-box">Ready.</div>
-    `;
+    m.id = 'zynai-v13-menu';
+    m.style = "position:fixed;top:10px;right:10px;width:190px;background:#111;color:#0f8;border:1px solid #0f8;z-index:999999;padding:10px;font-family:sans-serif;border-radius:8px;font-size:11px;";
+    m.innerHTML = `<div style="font-weight:bold;text-align:center;margin-bottom:8px;">V13 PRO GHOST</div>
+        <button id="v13-at" style="width:100%;margin:2px 0;cursor:pointer;">AUTO CLICK: OFF</button>
+        <button id="v13-sy" style="width:100%;margin:2px 0;cursor:pointer;">SMART SYNC</button>
+        <div id="v13-ans-box" style="margin-top:8px;border-top:1px solid #333;padding-top:5px;">Ready.</div>
+        <div id="v13-z" style="position:fixed;bottom:10px;right:10px;opacity:0.1;cursor:pointer;">Z</div>`;
     document.body.appendChild(m);
 
-    const z = document.createElement('div'); z.id = 'v12-z'; z.innerText = 'Z'; document.body.appendChild(z);
-    z.onclick = () => m.style.display = m.style.display === 'none' ? 'block' : 'none';
-
-    /* --- INTERACTION --- */
-    document.getElementById('v12-tg-at').onclick = function() { 
-        config.auto = !config.auto; this.innerText = `AUTO CLICK: ${config.auto?'ON':'OFF'}`;
-        this.style.background = config.auto ? "#0f8" : "#1a1a1a";
-        this.style.color = config.auto ? "#000" : "#0f8";
-    };
-    document.getElementById('v12-tg-st').onclick = function() { 
-        config.stealth = !config.stealth; this.innerText = `STEALTH: ${config.stealth?'ON':'OFF'}`;
-        this.style.background = config.stealth ? "#0f8" : "#1a1a1a";
-        this.style.color = config.stealth ? "#000" : "#0f8";
-    };
-    document.getElementById('v12-sync').onclick = () => {
-        let raw = prompt("Tempel data (Format: Soal|Jawaban):");
-        if(raw) {
-            raw.split('\n').forEach(l => {
-                let p = l.split('|');
-                if(p.length>=2) config.syncData.push({q:p[0].trim(), a:p[1].trim()});
-            });
-            alert("Synced " + config.syncData.length + " items");
-        }
-    };
+    document.getElementById('v13-at').onclick = function(){ config.auto = !config.auto; this.innerText = `AUTO: ${config.auto?'ON':'OFF'}`; };
+    document.getElementById('v13-sy').onclick = smartSync;
+    document.getElementById('v13-z').onclick = () => m.style.display = m.style.display==='none'?'block':'none';
 
     initStealth();
     setInterval(solve, 1500);
